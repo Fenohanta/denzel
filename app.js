@@ -8,14 +8,128 @@ const DENZEL_IMDB_ID = 'nm0000243';
 
 const CONNECTION_URL = "mongodb+srv://fenohanta:lolxdlolxd@denzel-tjyxp.mongodb.net/test?retryWrites=true";
 
-const DATABASE_NAME = "example";
+const DATABASE_NAME = "denzel";
+const graphqlHTTP = require("express-graphql");
+const gql = require('graphql-tag');
+const {
+  buildASTSchema
+} = require("graphql");
 
 var app = Express();
+//GraphQL schema
+const schema = buildASTSchema(gql `
+type Query {
+  populate: Populate
+  random: Movie
+  getMovie(id: String) : Movie
+  getMovies(metascore: Int, limit: Int): [Movie]
+  postReview(id: String, review: Review): Movie
+},
+type Movie {
+  link: String
+  id: String
+  metascore: Int
+  poster: String
+  rating: Float
+  synopsis: String
+  title: String
+  votes: Float
+  year: Int
+  date: String
+  review: String
+},
+type Populate{
+  total: String
+},
+input Review{
+  date: String
+  review: String
+}
+`)
+
+const root = {
+populate: async (source, args) => {
+  const movies = await populate(DENZEL_IMDB_ID);
+  const insertion = await collection.insertMany(movies);
+  return {
+    total: insertion.movie.n
+  };
+},
+random: async () => {
+  let query = {
+    "metascore": {
+      $gte: 70
+    }
+  }
+  let count = await collection.countDocuments(query);
+  let random = Math.floor(Math.random() * count);
+  let options = {
+    "limit": 1,
+    "skip": random
+  }
+  const movie = await collection.findOne(query, options);
+  return movie;
+},
+getMovie: async (args) => {
+  const movie = await collection.findOne({
+    "id": args.id
+  });
+  return movie;
+},
+getMovies: async (args) => {
+  let query = {
+    "metascore": {
+      $gte: args.metascore
+    }
+  };
+  let options = {
+    "limit": args.limit,
+    "sort": [
+      ['metascore', 'desc']
+    ]
+  };
+  const movies = await collection.find(query, options).toArray();
+  return movies;
+},
+postReview: async (args) => {
+  let selector = {
+    "id": args.id
+  };
+  let document = {
+    $set: args.review
+  };
+  let options = {
+    "upsert": true
+  };
+  const post = await collection.updateMany(selector, document, options)
+  const modified = await collection.findOne(selector);
+  return modified;
+}
+}
+
+async function populate(actor) {
+try {
+  console.log(`📽️  fetching filmography of ${actor}...`);
+  return await imdb(actor);
+} catch (e) {
+  console.error(e);
+}
+}
+
+
+
+app.use('/graphql', graphqlHTTP({
+  schema: schema,
+  rootValue: root,
+  graphiql: true
+}))
+
 
 app.use(BodyParser.json());
 app.use(BodyParser.urlencoded({ extended: true }));
 
 var database, collection;
+
 
 app.listen(3000, () => {
     MongoClient.connect(CONNECTION_URL, { useNewUrlParser: true }, (error, client) => {
@@ -33,6 +147,8 @@ app.listen(3000, () => {
                 if(error) {
                     return response.status(500).send(error);
                 }
+                console.log("Connected to " + DATABASE_NAME + "!");
+                console.log("goto browser");
                 response.send(`Hello world`);
             });
         });
@@ -71,7 +187,7 @@ app.listen(3000, () => {
                 response.send(resultat);
             });
         });
-
+        //post movies by id
         app.post("/movies/:id", (request, response) => {
             collection.updateOne(
               { id: request.params.id },
@@ -85,25 +201,7 @@ app.listen(3000, () => {
             );
           });
 
-
-
-        // app.get('/movies/search', (req, res, next) => {
-        //     var my_limit = parseInt( req.param('limit'));
-            
-        //     var my_metascore = parseInt( req.param('metascore'));
-        //     if (req.param('limit')==null)my_limit=5;
-        //     if(req.param('metascore')== null) my_metascore=0;
-        //     collection.aggregate([
-        //       { $match: { metascore: { $gte: my_metascore } }},
-        //       { $sample: { size: my_limit } } ]).toArray(function(err, docs) {
-        //       assert.equal(err, null);
-        //       console.log("Search");
-        //       console.log(docs); res.json(docs);
-              
-        //     });
-        
-        //   });
-
+        //search with metascore and can limit responses
         app.get("/movies/search", (request, response) => {
             console.log(request.query.limit);
             collection
@@ -121,6 +219,8 @@ app.listen(3000, () => {
               });
           });
 
+        
+          
 
     });
 });
